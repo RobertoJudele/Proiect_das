@@ -1,0 +1,40 @@
+{
+  "name": "proiect_das",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "jest --runInBand --forceExit",
+    "test:attacks": "jest tests/attacks.test.js --runInBand --forceExit --verbose"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 10000
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RobertoJudele/Proiect_das.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/RobertoJudele/Proiect_das/issues"
+  },
+  "homepage": "https://github.com/RobertoJudele/Proiect_das#readme",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "better-sqlite3": "^12.9.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.4.1",
+    "express-validator": "^7.3.2",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2"
+  }
+}

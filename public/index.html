@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AuthX — Break the Login</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- AUTH PAGE -->
+  <div id="auth-page" class="page">
+    <div class="auth-card">
+      <div class="logo">🔐 AuthX</div>
+      <p class="subtitle">Compania fictivă · v1-vulnerable</p>
+
+      <div class="vuln-banner">
+        ⚠️ VARIANTA NESECURIZATĂ — pentru demonstrație educațională
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" id="tab-login" onclick="switchTab('login')">Login</button>
+        <button class="tab" id="tab-register" onclick="switchTab('register')">Register</button>
+      </div>
+
+      <!-- LOGIN FORM -->
+      <form id="login-form" onsubmit="doLogin(event)">
+        <div class="field">
+          <label>Email</label>
+          <input type="text" id="login-email" placeholder="email@exemplu.com" required />
+        </div>
+        <div class="field">
+          <label>Parolă</label>
+          <input type="password" id="login-password" placeholder="••••••••" required />
+        </div>
+        <button type="submit" class="btn-primary">Autentificare</button>
+        <div class="hint">💡 Atac: încearcă <code>' OR '1'='1</code> ca email</div>
+      </form>
+
+      <!-- REGISTER FORM -->
+      <form id="register-form" class="hidden" onsubmit="doRegister(event)">
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="reg-email" placeholder="email@exemplu.com" required />
+        </div>
+        <div class="field">
+          <label>Parolă</label>
+          <input type="password" id="reg-password" placeholder="••••••••" required />
+        </div>
+        <div class="field">
+          <label>Rol</label>
+          <select id="reg-role">
+            <option value="ANALYST">ANALYST</option>
+            <option value="MANAGER">MANAGER</option>
+          </select>
+        </div>
+        <button type="submit" class="btn-primary">Creare cont</button>
+      </form>
+
+      <div id="auth-msg" class="msg hidden"></div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PAGE -->
+  <div id="dashboard-page" class="page hidden">
+    <header class="topbar">
+      <div class="brand">🔐 AuthX <span class="badge-vuln">v1-vulnerable</span></div>
+      <div class="user-info">
+        <span id="user-display"></span>
+        <button class="btn-logout" onclick="doLogout()">Logout</button>
+      </div>
+    </header>
+
+    <div class="container">
+      <!-- VULNERABILITIES PANEL -->
+      <div class="vuln-panel">
+        <h3>🚨 Vulnerabilități active</h3>
+        <div class="vuln-list">
+          <span class="vtag">Plain-text passwords</span>
+          <span class="vtag">SQL Injection</span>
+          <span class="vtag">User Enumeration</span>
+          <span class="vtag">No Rate Limiting</span>
+          <span class="vtag">JWT fără expiry</span>
+          <span class="vtag">IDOR Tickets</span>
+          <span class="vtag">Audit Log public</span>
+        </div>
+      </div>
+
+      <div class="main-grid">
+        <!-- TICKETS SECTION -->
+        <section class="card">
+          <div class="card-header">
+            <h2>📋 Tickets</h2>
+            <button class="btn-sm" onclick="openCreateModal()">+ Nou</button>
+          </div>
+          <div id="tickets-list"><p class="loading">Se încarcă...</p></div>
+        </section>
+
+        <!-- AUDIT LOG SECTION -->
+        <section class="card">
+          <div class="card-header">
+            <h2>📁 Audit Log <span class="badge-warn">PUBLIC</span></h2>
+            <button class="btn-sm" onclick="loadAudit()">↻ Refresh</button>
+          </div>
+          <div id="audit-list"><p class="loading">Se încarcă...</p></div>
+        </section>
+      </div>
+
+      <!-- FORGOT PASSWORD -->
+      <section class="card mt">
+        <div class="card-header"><h2>🔑 Reset Parolă</h2></div>
+        <form onsubmit="doForgot(event)" class="inline-form">
+          <input type="email" id="forgot-email" placeholder="email@exemplu.com" />
+          <button type="submit" class="btn-sm">Generează token</button>
+        </form>
+        <div id="reset-token-box" class="token-box hidden"></div>
+        <form onsubmit="doReset(event)" class="inline-form mt-sm">
+          <input type="text" id="reset-token-input" placeholder="Token primit" />
+          <input type="password" id="new-password" placeholder="Parolă nouă" />
+          <button type="submit" class="btn-sm btn-warn">Resetează</button>
+        </form>
+        <div class="hint">💡 Atac: reutilizează același token de mai multe ori</div>
+      </section>
+    </div>
+  </div>
+
+  <!-- CREATE TICKET MODAL -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Ticket nou</h3>
+      <form onsubmit="doCreateTicket(event)">
+        <div class="field">
+          <label>Titlu</label>
+          <input type="text" id="t-title" required />
+        </div>
+        <div class="field">
+          <label>Descriere</label>
+          <textarea id="t-desc" rows="3" placeholder="Poate conține <script>alert('XSS')</script>"></textarea>
+        </div>
+        <div class="field">
+          <label>Severitate</label>
+          <select id="t-severity">
+            <option>LOW</option>
+            <option>MED</option>
+            <option>HIGH</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-ghost" onclick="closeModal()">Anulează</button>
+          <button type="submit" class="btn-primary">Creează</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
