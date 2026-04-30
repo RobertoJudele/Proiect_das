@@ -16,8 +16,13 @@ const db = require('../db');
 // VULNERABILITATE: Endpoint public - nu necesita autentificare
 // Oricine poate vedea toate actiunile din sistem
 // -------------------------------------------------------
-router.get('/', (req, res) => {
-  // VULNERABILITATE: Fara authMiddleware => oricine poate accesa
+const authMiddleware = require('../middleware/auth');
+
+router.get('/', authMiddleware, (req, res) => {
+  if (req.user.role !== 'MANAGER') {
+    return res.status(403).json({ error: 'Doar managerii pot accesa logurile de audit' });
+  }
+  
   const logs = db.prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC').all();
   res.json(logs);
 });

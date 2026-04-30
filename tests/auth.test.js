@@ -7,8 +7,9 @@ const app = require('../src/app');
 const db = require('../src/db');
 
 // Curatam DB-ul inainte de fiecare test
-beforeEach(() => {
+beforeEach(async () => {
   db.exec('DELETE FROM users; DELETE FROM reset_tokens; DELETE FROM audit_logs;');
+  await request(app).post('/api/auth/reset-limiter').send();
 });
 
 afterAll(() => {
@@ -57,15 +58,16 @@ describe('POST /api/auth/register', () => {
     expect(res.status).toBe(400);
   });
 
-  // DEMONSTRATIE VULNERABILITATE: parola stocata in clar
-  test('[VULN] parola este stocata in clar in baza de date', async () => {
+  // IN V2: parola este protejata
+  test('[SECURE] parola NU este stocata in clar in baza de date', async () => {
     await request(app)
       .post('/api/auth/register')
       .send({ email: 'vuln@example.com', password: 'parolaSecreta' });
 
     const user = db.prepare('SELECT password FROM users WHERE email = ?').get('vuln@example.com');
-    // In v1: parola e in clar, nu e hash-uita
-    expect(user.password).toBe('parolaSecreta');
+    // In v2: parola e hash-uita cu bcrypt, nu va fi la fel ca plain text
+    expect(user.password).not.toBe('parolaSecreta');
+    expect(user.password.startsWith('$2b$')).toBe(true); // prefix bcrypt
   });
 });
 
@@ -139,12 +141,13 @@ describe('POST /api/auth/forgot-password', () => {
     expect(res.body.resetToken).toBeDefined();
   });
 
-  test('email inexistent returneaza 404', async () => {
+  test('email inexistent returneaza 200 generic pentru a preveni enumeration', async () => {
     const res = await request(app)
       .post('/api/auth/forgot-password')
       .send({ email: 'nu_exista@example.com' });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200); // In v2 intoarce 200 cu mesaj generic
+    expect(res.body.message).toMatch(/Daca email-ul exista/i);
   });
 });
 

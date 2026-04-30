@@ -2,21 +2,29 @@
 // VULNERABIL: Verificare token slaba, fara validare corecta
 const jwt = require('jsonwebtoken');
 
-function authMiddleware(req, res, next) {
-  const token = req.headers['authorization'];
+const db = require('../db');
 
-  // VULNERABILITATE: Accepta token-ul direct din header fara "Bearer " prefix check
-  if (!token) {
-    return res.status(401).json({ error: 'Token lipsa' });
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers['authorization'];
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token lipsa sau format incorect (necesita Bearer)' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  // Verificare blacklist
+  const isBlacklisted = db.prepare('SELECT id FROM token_blacklist WHERE token = ?').get(token);
+  if (isBlacklisted) {
+    return res.status(401).json({ error: 'Token invalidat (te rugam sa te autentifici din nou)' });
   }
 
   try {
-    // VULNERABILITATE: Secretul e slab si hardcodat
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret123');
     req.user = decoded;
     next();
   } catch (err) {
-    return res.status(401).json({ error: 'Token invalid' });
+    return res.status(401).json({ error: 'Token invalid sau expirat' });
   }
 }
 

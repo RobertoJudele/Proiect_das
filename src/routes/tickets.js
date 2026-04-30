@@ -10,6 +10,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { body, validationResult } = require('express-validator');
 const db = require('../db');
 const authMiddleware = require('../middleware/auth');
 
@@ -19,8 +20,12 @@ const authMiddleware = require('../middleware/auth');
 // Un ANALYST poate vedea ticket-urile altor ANALYST-i sau ale MANAGER-ilor
 // -------------------------------------------------------
 router.get('/', authMiddleware, (req, res) => {
-  // VULNERABILITATE: Nu filtram dupa owner_id => IDOR
-  const tickets = db.prepare('SELECT * FROM tickets').all();
+  let tickets;
+  if (req.user.role === 'MANAGER') {
+    tickets = db.prepare('SELECT * FROM tickets').all();
+  } else {
+    tickets = db.prepare('SELECT * FROM tickets WHERE owner_id = ?').all(req.user.userId);
+  }
   res.json(tickets);
 });
 
@@ -33,7 +38,11 @@ router.get('/:id', authMiddleware, (req, res) => {
   if (!ticket) {
     return res.status(404).json({ error: 'Ticket negasit' });
   }
-  // VULNERABILITATE: Nu verificam ca ticket.owner_id === req.user.userId
+  
+  if (req.user.role !== 'MANAGER' && ticket.owner_id !== req.user.userId) {
+    return res.status(403).json({ error: 'Acces interzis' });
+  }
+
   res.json(ticket);
 });
 
@@ -41,49 +50,65 @@ router.get('/:id', authMiddleware, (req, res) => {
 // POST /api/tickets
 // VULNERABILITATE: Description poate contine XSS (HTML/JS netratat)
 // -------------------------------------------------------
-router.post('/', authMiddleware, (req, res) => {
-  const { title, description, severity } = req.body;
+router.post('/', 
+  authMiddleware, 
+  [
+    body('title').notEmpty().withMessage('Titlul este obligatoriu').escape(),
+    body('description').optional().escape(),
+    body('severity').optional().isIn(['LOW', 'MED', 'HIGH']).withMessage('Severitate invalida')
+  ],
+  (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: errors.array()[0].msg });
+    }
 
-  if (!title) {
-    return res.status(400).json({ error: 'Titlul este obligatoriu' });
-  }
+    const { title, description, severity } = req.body;
 
-  // VULNERABILITATE: description nu e sanitizata => XSS posibil
-  const result = db.prepare(
-    'INSERT INTO tickets (title, description, severity, owner_id) VALUES (?, ?, ?, ?)'
-  ).run(title, description || '', severity || 'LOW', req.user.userId);
+    const result = db.prepare(
+      'INSERT INTO tickets (title, description, severity, owner_id) VALUES (?, ?, ?, ?)'
+    ).run(title, description || '', severity || 'LOW', req.user.userId);
 
-  res.status(201).json({
-    message: 'Ticket creat',
-    ticketId: result.lastInsertRowid
-  });
+    res.status(201).json({
+      message: 'Ticket creat',
+      ticketId: result.lastInsertRowid
+    });
 });
 
 // -------------------------------------------------------
 // PUT /api/tickets/:id
 // VULNERABILITATE IDOR: Oricine poate modifica orice ticket
 // -------------------------------------------------------
-router.put('/:id', authMiddleware, (req, res) => {
-  const { title, description, severity, status } = req.body;
-  const ticketId = req.params.id;
+router.put('/:id', 
+  authMiddleware,
+  [
+    body('title').optional().escape(),
+    body('description').optional().escape()
+  ], 
+  (req, res) => {
+    const { title, description, severity, status } = req.body;
+    const ticketId = req.params.id;
 
-  const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(ticketId);
-  if (!ticket) {
-    return res.status(404).json({ error: 'Ticket negasit' });
-  }
+    const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket negasit' });
+    }
 
-  // VULNERABILITATE: Nu verificam owner_id sau rol
-  db.prepare(
-    "UPDATE tickets SET title = ?, description = ?, severity = ?, status = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(
-    title || ticket.title,
-    description || ticket.description,
-    severity || ticket.severity,
-    status || ticket.status,
-    ticketId
-  );
+    if (req.user.role !== 'MANAGER' && ticket.owner_id !== req.user.userId) {
+      return res.status(403).json({ error: 'Acces interzis' });
+    }
 
-  res.json({ message: 'Ticket actualizat' });
+    db.prepare(
+      "UPDATE tickets SET title = ?, description = ?, severity = ?, status = ?, updated_at = datetime('now') WHERE id = ?"
+    ).run(
+      title || ticket.title,
+      description || ticket.description,
+      severity || ticket.severity,
+      status || ticket.status,
+      ticketId
+    );
+
+    res.json({ message: 'Ticket actualizat' });
 });
 
 // -------------------------------------------------------
@@ -98,7 +123,10 @@ router.delete('/:id', authMiddleware, (req, res) => {
     return res.status(404).json({ error: 'Ticket negasit' });
   }
 
-  // VULNERABILITATE: Orice user autentificat poate sterge orice ticket
+  if (req.user.role !== 'MANAGER' && ticket.owner_id !== req.user.userId) {
+    return res.status(403).json({ error: 'Acces interzis' });
+  }
+
   db.prepare('DELETE FROM tickets WHERE id = ?').run(ticketId);
   res.json({ message: 'Ticket sters' });
 });

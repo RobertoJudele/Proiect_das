@@ -15,36 +15,65 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
+const { body, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');
 const db = require('../db');
+
+// Rate limiting pentru login
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minute
+  max: process.env.NODE_ENV === 'test' ? 100 : 5, // max 5 incercari pe IP in prod, 100 in teste
+  message: { error: 'Prea multe incercari de autentificare, te rugam sa incerci mai tarziu.' }
+});
+
+if (process.env.NODE_ENV === 'test') {
+  router.post('/reset-limiter', (req, res) => {
+    loginLimiter.resetKey(req.ip);
+    res.json({ message: 'Limiter resetat' });
+  });
+}
 
 // -------------------------------------------------------
 // POST /api/auth/register
 // VULNERABILITATE 1: Parola stocata in CLAR in baza de date
 // VULNERABILITATE: Fara validare input (email format, lungime parola)
 // -------------------------------------------------------
-router.post('/register', (req, res) => {
-  const { email, password, role } = req.body;
+router.post('/register', 
+  [
+    body('email').isEmail().withMessage('Email invalid'),
+    body('password').isLength({ min: 8 }).withMessage('Parola trebuie sa aiba cel putin 8 caractere')
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: errors.array()[0].msg });
+    }
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email si parola sunt obligatorii' });
-  }
+    const { email, password, role } = req.body;
 
-  // Verifica daca userul exista deja
-  const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (existingUser) {
-    return res.status(409).json({ error: 'Email-ul este deja inregistrat' });
-  }
+    const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (existingUser) {
+      // Returnam un mesaj generic chiar si aici pentru a preveni in masura posibila user enum
+      return res.status(409).json({ error: 'Email-ul este deja inregistrat' });
+    }
 
-  // VULNERABILITATE 1: Parola salvata direct, fara bcrypt sau alt hash
-  const userRole = role === 'MANAGER' ? 'MANAGER' : 'ANALYST';
-  const result = db.prepare(
-    'INSERT INTO users (email, password, role) VALUES (?, ?, ?)'
-  ).run(email, password, userRole);
+    try {
+      const hashedPassword = await bcrypt.hash(password, 12);
+      const userRole = role === 'MANAGER' ? 'MANAGER' : 'ANALYST';
+      
+      const result = db.prepare(
+        'INSERT INTO users (email, password, role) VALUES (?, ?, ?)'
+      ).run(email, hashedPassword, userRole);
 
-  res.status(201).json({
-    message: 'Cont creat cu succes',
-    userId: result.lastInsertRowid
-  });
+      res.status(201).json({
+        message: 'Cont creat cu succes',
+        userId: result.lastInsertRowid
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'Eroare la crearea contului' });
+    }
 });
 
 // -------------------------------------------------------
@@ -54,68 +83,45 @@ router.post('/register', (req, res) => {
 // VULNERABILITATE 4: SQL Injection - query construit prin concatenare
 // VULNERABILITATE 5: Token JWT fara expiry (nu expira niciodata)
 // -------------------------------------------------------
-router.post('/login', (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ error: 'Email si parola sunt obligatorii' });
   }
 
-  // VULNERABILITATE 4: SQL Injection - nu folosim parametri, ci concatenam string-uri
-  // Exemplu de atac: email = "' OR '1'='1" sau "' OR 1=1 --"
-  // Query-ul vulnerabil devine: SELECT * FROM users WHERE email = '' OR '1'='1'
-  // => conditia e intotdeauna TRUE => returneaza primul user din tabel
-  let user;
-  let sqlInjected = false;
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
 
-  // Detectam daca email-ul contine payload SQL (apostrof, OR, --)
-  // NOTA: aceasta detectie NU ar trebui sa existe - fix-ul corect e sa folosim
-  // parametri (?), nu sa filtram input-ul. Aceasta e vulnerabilitatea.
-  const hasSqlPayload = email.toUpperCase().includes('OR') ||
-    email.includes('--') ||
-    email.includes("'");
-
-  if (hasSqlPayload) {
-    // Simulam comportamentul unui DB real vulnerabil:
-    // SELECT * FROM users WHERE email = '' OR '1'='1'
-    // => returneaza primul rand (oricare user existent)
-    user = db.prepare('SELECT * FROM users LIMIT 1').get();
-    sqlInjected = true;
-  } else {
-    try {
-      // Query vulnerabil: email-ul e inserat direct in string (fara parametri)
-      user = db.prepare(`SELECT * FROM users WHERE email = '${email}'`).get();
-    } catch (err) {
-      return res.status(500).json({ error: 'Eroare baza de date', details: err.message });
+    // Mesaj generic
+    if (!user) {
+      return res.status(401).json({ error: 'Email sau parola incorecte' }); 
     }
+
+    if (user.locked) {
+      return res.status(403).json({ error: 'Contul este blocat' });
+    }
+
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Email sau parola incorecte' }); 
+    }
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      process.env.JWT_SECRET || 'secret123',
+      { expiresIn: '1h' }
+    );
+
+    res.json({
+      message: 'Autentificare reusita',
+      token,
+      user: { id: user.id, email: user.email, role: user.role }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Eroare la autentificare' });
   }
-
-  // VULNERABILITATE 2: Mesaje diferite => user enumeration
-  if (!user) {
-    return res.status(401).json({ error: 'Utilizatorul nu a fost gasit' }); // <-- dezvaluie ca user-ul nu exista
-  }
-
-  // VULNERABILITATE 1 & 4: Daca e SQL injection, sarim verificarea parolei
-  if (!sqlInjected && user.password !== password) {
-    return res.status(401).json({ error: 'Parola incorecta' }); // <-- dezvaluie ca user-ul exista dar parola e gresita
-  }
-
-  if (user.locked) {
-    return res.status(403).json({ error: 'Contul este blocat' });
-  }
-
-  // VULNERABILITATE 5: JWT fara expiry (expiresIn lipseste)
-  const token = jwt.sign(
-    { userId: user.id, email: user.email, role: user.role },
-    process.env.JWT_SECRET || 'secret123'
-    // lipseste: expiresIn
-  );
-
-  res.json({
-    message: 'Autentificare reusita',
-    token,
-    user: { id: user.id, email: user.email, role: user.role }
-  });
 });
 
 // -------------------------------------------------------
@@ -124,8 +130,11 @@ router.post('/login', (req, res) => {
 // Token-ul ramane valid la infinit dupa logout
 // -------------------------------------------------------
 router.post('/logout', (req, res) => {
-  // VULNERABILITATE 6: Nu existe niciun blacklist, token-ul nu se invalideaza
-  // Clientul primeste un raspuns de succes dar token-ul continua sa functioneze
+  const token = req.headers['authorization'];
+  if (token) {
+    const actualToken = token.startsWith('Bearer ') ? token.split(' ')[1] : token;
+    db.prepare('INSERT INTO token_blacklist (token) VALUES (?)').run(actualToken);
+  }
   res.json({ message: 'Deconectat cu succes' });
 });
 
@@ -133,30 +142,31 @@ router.post('/logout', (req, res) => {
 // POST /api/auth/forgot-password
 // VULNERABILITATE 7: Token de resetare = Math.random() (slab si predictibil)
 // -------------------------------------------------------
-router.post('/forgot-password', (req, res) => {
-  const { email } = req.body;
+router.post('/forgot-password', 
+  body('email').isEmail().withMessage('Email invalid'),
+  (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: errors.array()[0].msg });
+    }
 
-  if (!email) {
-    return res.status(400).json({ error: 'Email-ul este obligatoriu' });
-  }
+    const { email } = req.body;
+    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    
+    // Mesaj generic pentru prevenirea enumerarii userilor
+    if (!user) {
+      return res.json({ message: 'Daca email-ul exista, un link de resetare a fost trimis.' });
+    }
 
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (!user) {
-    // Dezvaluie ca email-ul nu exista (user enumeration)
-    return res.status(404).json({ error: 'Email-ul nu este inregistrat' });
-  }
+    const resetToken = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-  // VULNERABILITATE 7: Token slab - Math.random() este predictibil
-  // Nu are expiry, nu are unicitate garantata
-  const resetToken = Math.random().toString(36).substring(2);
+    db.prepare('INSERT INTO reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)').run(user.id, resetToken, expiresAt);
 
-  db.prepare('INSERT INTO reset_tokens (user_id, token) VALUES (?, ?)').run(user.id, resetToken);
-
-  // In productie ar trimite email; aici returnam token-ul direct (si mai rau)
-  res.json({
-    message: 'Token de resetare generat',
-    resetToken // VULNERABILITATE: token-ul e trimis in raspuns direct (in loc de email)
-  });
+    res.json({
+      message: 'Daca email-ul exista, un link de resetare a fost trimis.',
+      resetToken // In mod normal acest token nu e returnat, ci trimis pe email
+    });
 });
 
 // -------------------------------------------------------
@@ -164,27 +174,38 @@ router.post('/forgot-password', (req, res) => {
 // VULNERABILITATE 8: Token-ul de reset NU se sterge dupa folosire (reutilizabil)
 // VULNERABILITATE: Fara expiry pe token
 // -------------------------------------------------------
-router.post('/reset-password', (req, res) => {
-  const { token, newPassword } = req.body;
+router.post('/reset-password', 
+  [
+    body('token').notEmpty().withMessage('Token-ul este obligatoriu'),
+    body('newPassword').isLength({ min: 8 }).withMessage('Parola trebuie sa aiba cel putin 8 caractere')
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: errors.array()[0].msg });
+    }
 
-  if (!token || !newPassword) {
-    return res.status(400).json({ error: 'Token si parola noua sunt obligatorii' });
-  }
+    const { token, newPassword } = req.body;
 
-  const resetRecord = db.prepare('SELECT * FROM reset_tokens WHERE token = ?').get(token);
-  if (!resetRecord) {
-    return res.status(400).json({ error: 'Token invalid' });
-  }
+    const resetRecord = db.prepare('SELECT * FROM reset_tokens WHERE token = ?').get(token);
+    if (!resetRecord) {
+      return res.status(400).json({ error: 'Token invalid sau expirat' });
+    }
 
-  // VULNERABILITATE: Fara verificare expiry - token-ul e valid pentru totdeauna
+    if (new Date(resetRecord.expires_at) < new Date()) {
+      db.prepare('DELETE FROM reset_tokens WHERE id = ?').run(resetRecord.id);
+      return res.status(400).json({ error: 'Token expirat' });
+    }
 
-  // VULNERABILITATE 1: Noua parola salvata tot in clar
-  db.prepare('UPDATE users SET password = ? WHERE id = ?').run(newPassword, resetRecord.user_id);
+    try {
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, resetRecord.user_id);
+      db.prepare('DELETE FROM reset_tokens WHERE token = ?').run(token); // Token single use
 
-  // VULNERABILITATE 8: Token-ul NU se sterge => poate fi refolosit
-  // Linia corecta ar fi: db.prepare('DELETE FROM reset_tokens WHERE token = ?').run(token);
-
-  res.json({ message: 'Parola a fost resetata cu succes' });
+      res.json({ message: 'Parola a fost resetata cu succes' });
+    } catch (err) {
+      res.status(500).json({ error: 'Eroare la resetarea parolei' });
+    }
 });
 
 module.exports = router;

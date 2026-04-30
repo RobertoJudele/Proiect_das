@@ -9,8 +9,9 @@ const request = require('supertest');
 const app = require('../src/app');
 const db = require('../src/db');
 
-beforeEach(() => {
+beforeEach(async () => {
   db.exec('DELETE FROM users; DELETE FROM reset_tokens; DELETE FROM audit_logs; DELETE FROM tickets;');
+  await request(app).post('/api/auth/reset-limiter').send();
 });
 
 afterAll(() => {
@@ -36,12 +37,11 @@ describe('[ATAC 1] SQL Injection pe /api/auth/login', () => {
       .post('/api/auth/login')
       .send({ email: "' OR '1'='1", password: 'orice' });
 
-    // In v1 (vulnerabil): atacul reuseste, primim token fara sa stim parola
-    expect(res.status).toBe(200);
-    expect(res.body.token).toBeDefined();
+    // In v2 (secure): atacul ESUAZA, primim 401 (Unauthorized)
+    expect(res.status).toBe(401);
+    expect(res.body.token).toBeUndefined();
 
-    console.log('[ATAC 1 REUSIT] SQL Injection a functionat! Token primit:', res.body.token ? 'DA' : 'NU');
-    console.log('  User accesat prin injection:', res.body.user?.email);
+    console.log('[ATAC 1 ESUAT] SQL Injection blocat! Nu s-a primit token.');
   });
 
   test('[ATAC 1b] apostroful in email expune erori de DB (information disclosure)', async () => {
@@ -50,11 +50,9 @@ describe('[ATAC 1] SQL Injection pe /api/auth/login', () => {
       .post('/api/auth/login')
       .send({ email: "test'broken", password: 'x' });
 
-    // In v1: poate returna 401 (user not found) sau 500 (eroare DB)
-    // Ambele sunt problematice pentru ca dezvaluie informatii
-    // Important: nu returneaza 400 cu mesaj generic - endpoint-ul e vulnerabil
-    expect([401, 500]).toContain(res.status);
-    console.log('[ATAC 1b] Apostrof in email => status:', res.status, '| body:', JSON.stringify(res.body));
+    // In v2: primim eroare 401 (eroare de auth generica, ca si cum userul nu exista) - SQL injection nu sparge aplicatia
+    expect(res.status).toBe(401);
+    console.log('[ATAC 1b blocat] Apostrof in email => status:', res.status, '| body:', JSON.stringify(res.body));
   });
 });
 
@@ -71,20 +69,18 @@ describe('[ATAC 2] User Enumeration prin mesaje de eroare diferite', () => {
   test('mesaj diferit pentru user inexistent vs parola gresita', async () => {
     const resUserInexistent = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'nuexista@example.com', password: 'parola' });
+      .send({ email: 'nuexista@example.com', password: 'parolaFalsa' });
 
     const resParolaGresita = await request(app)
       .post('/api/auth/login')
       .send({ email: 'existent@example.com', password: 'gresita' });
 
-    // DEMONSTRATIE: mesajele sunt DIFERITE => atacatorul stie ce email-uri exista
-    expect(resUserInexistent.body.error).toBe('Utilizatorul nu a fost gasit');
-    expect(resParolaGresita.body.error).toBe('Parola incorecta');
-    expect(resUserInexistent.body.error).not.toBe(resParolaGresita.body.error);
+    // In v2: ambele returneaza exact acelasi mesaj
+    expect(resUserInexistent.body.error).toBe('Email sau parola incorecte');
+    expect(resParolaGresita.body.error).toBe('Email sau parola incorecte');
+    expect(resUserInexistent.body.error).toBe(resParolaGresita.body.error);
 
-    console.log('[ATAC 2 REUSIT] User enumeration posibil!');
-    console.log('  Email inexistent:', resUserInexistent.body.error);
-    console.log('  Parola gresita:  ', resParolaGresita.body.error);
+    console.log('[ATAC 2 BLOCAT] User enumeration nu mai e posibil!');
   });
 });
 
@@ -99,27 +95,23 @@ describe('[ATAC 3] Brute Force - fara rate limiting', () => {
   });
 
   test('poate incerca parole nelimitat fara a fi blocat', async () => {
-    const paroleDeTestat = ['pass1', 'pass2', 'pass3', 'pass4', 'pass5', 'parolaCorecta'];
     let tokenGasit = null;
 
-    for (const parola of paroleDeTestat) {
-      const res = await request(app)
+    // Rulam 100 de incercari gresite pentru a atinge limita (in test mode limit = 100)
+    for (let i = 0; i < 100; i++) {
+      await request(app)
         .post('/api/auth/login')
-        .send({ email: 'tinta@example.com', password: parola });
-
-      if (res.status === 200) {
-        tokenGasit = res.body.token;
-        console.log(`[ATAC 3 REUSIT] Parola gasita prin brute force: "${parola}"`);
-        break;
-      }
+        .send({ email: 'tinta@example.com', password: 'parolaGresita' + i });
     }
 
-    // In v1: brute force reuseste, niciun cont blocat
-    expect(tokenGasit).not.toBeNull();
+    // Incercarea 101 ar trebui sa dea eroare 429
+    const resFinal = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'tinta@example.com', password: 'parolaCorecta' });
+    
+    expect(resFinal.status).not.toBe(200); 
 
-    // Verifica ca userul NU e blocat dupa multiple incercari
-    const user = db.prepare('SELECT locked FROM users WHERE email = ?').get('tinta@example.com');
-    expect(user.locked).toBe(0);
+    console.log('[ATAC 3 BLOCAT] Brute force oprit de Rate Limiting!');
   });
 });
 
@@ -139,19 +131,19 @@ describe('[ATAC 4] Token reutilizabil dupa logout (Session Fixation)', () => {
 
     const token = loginRes.body.token;
 
-    // Logout
+    // Logout (acum cu token, altfel nu e procesat)
     await request(app)
       .post('/api/auth/logout')
+      .set('authorization', 'Bearer ' + token)
       .send();
 
-    // Token-ul ar trebui sa fie invalid dupa logout
-    // In v1: token-ul INCA FUNCTIONEAZA (vulnerabil)
+    // In v2: Token-ul e blacklistat
     const ticketRes = await request(app)
       .get('/api/tickets')
-      .set('authorization', token);
+      .set('authorization', 'Bearer ' + token);
 
-    expect(ticketRes.status).toBe(200); // In v1: acces permis chiar dupa logout!
-    console.log('[ATAC 4 REUSIT] Token-ul ramane valid dupa logout!');
+    expect(ticketRes.status).toBe(401);
+    console.log('[ATAC 4 BLOCAT] Token-ul este invalid dupa logout!');
   });
 });
 
@@ -175,13 +167,13 @@ describe('[ATAC 5] Reset Token reutilizabil (token nu se sterge)', () => {
       .post('/api/auth/reset-password')
       .send({ token: resetToken, newPassword: 'parolaNoua1' });
 
-    // A doua resetare cu ACELASI token (ar trebui sa esueze, dar in v1 reuseste)
+    // In v2: Token-ul de reset e sters dupa folosire, a doua incercare e 400
     const secondReset = await request(app)
       .post('/api/auth/reset-password')
       .send({ token: resetToken, newPassword: 'parolaNoua2' });
 
-    expect(secondReset.status).toBe(200); // In v1: TOKEN REUTILIZAT CU SUCCES!
-    console.log('[ATAC 5 REUSIT] Token-ul de reset a fost reutilizat!');
+    expect(secondReset.status).toBe(400); 
+    console.log('[ATAC 5 BLOCAT] Token-ul de reset a fost invalidat dupa prima utilizare!');
   });
 });
 
@@ -192,40 +184,39 @@ describe('[ATAC 6] IDOR - acces neautorizat la resursele altui user', () => {
   test('user B poate vedea si modifica ticket-ul creat de user A', async () => {
     // User A se inregistreaza si creeaza un ticket
     await request(app).post('/api/auth/register')
-      .send({ email: 'userA@example.com', password: 'parolaA' });
+      .send({ email: 'userA@example.com', password: 'parolaA123' });
     const loginA = await request(app).post('/api/auth/login')
-      .send({ email: 'userA@example.com', password: 'parolaA' });
+      .send({ email: 'userA@example.com', password: 'parolaA123' });
     const tokenA = loginA.body.token;
 
     const ticketRes = await request(app)
       .post('/api/tickets')
-      .set('authorization', tokenA)
+      .set('authorization', 'Bearer ' + tokenA)
       .send({ title: 'Ticket secret al lui A', description: 'Date confidentiale', severity: 'HIGH' });
     const ticketId = ticketRes.body.ticketId;
 
     // User B se inregistreaza si acceseaza ticket-ul lui A
     await request(app).post('/api/auth/register')
-      .send({ email: 'userB@example.com', password: 'parolaB' });
+      .send({ email: 'userB@example.com', password: 'parolaB123' });
     const loginB = await request(app).post('/api/auth/login')
-      .send({ email: 'userB@example.com', password: 'parolaB' });
+      .send({ email: 'userB@example.com', password: 'parolaB123' });
     const tokenB = loginB.body.token;
 
-    // IDOR: User B poate accesa ticket-ul lui A
+    // IDOR blocat: User B incearca sa acceseze ticket-ul lui A => 403
     const getRes = await request(app)
       .get(`/api/tickets/${ticketId}`)
-      .set('authorization', tokenB);
+      .set('authorization', 'Bearer ' + tokenB);
 
-    expect(getRes.status).toBe(200);
-    expect(getRes.body.title).toBe('Ticket secret al lui A');
-    console.log('[ATAC 6 REUSIT] IDOR: User B a accesat ticket-ul lui User A!');
+    expect(getRes.status).toBe(403);
+    console.log('[ATAC 6 BLOCAT] IDOR Read restrictionat!');
 
-    // IDOR: User B poate sterge ticket-ul lui A
+    // IDOR blocat: User B incearca sa stearga ticket-ul lui A => 403
     const deleteRes = await request(app)
       .delete(`/api/tickets/${ticketId}`)
-      .set('authorization', tokenB);
+      .set('authorization', 'Bearer ' + tokenB);
 
-    expect(deleteRes.status).toBe(200);
-    console.log('[ATAC 6 REUSIT] IDOR: User B a sters ticket-ul lui User A!');
+    expect(deleteRes.status).toBe(403);
+    console.log('[ATAC 6 BLOCAT] IDOR Delete restrictionat!');
   });
 });
 
@@ -236,8 +227,8 @@ describe('[ATAC 7] Audit Log public - fara autentificare', () => {
   test('oricine poate accesa audit log-ul fara token', async () => {
     const res = await request(app)
       .get('/api/audit');
-    // Nu trimitem niciun token, dar primim 200
-    expect(res.status).toBe(200);
-    console.log('[ATAC 7 REUSIT] Audit log accesibil public, fara autentificare!');
+    // Nu trimitem niciun token, dar trebuie sa primim 401 in v2
+    expect(res.status).toBe(401);
+    console.log('[ATAC 7 BLOCAT] Audit log securizat - cere autentificare!');
   });
 });
