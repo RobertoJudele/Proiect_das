@@ -1,12 +1,9 @@
-// tests/auth.test.js
-// Teste pentru fluxul normal de autentificare (v1-vulnerable)
-// Verifica ca functionalitatile de baza functioneaza
+
 
 const request = require('supertest');
 const app = require('../src/app');
 const db = require('../src/db');
 
-// Curatam DB-ul inainte de fiecare test
 beforeEach(() => {
   db.exec('DELETE FROM users; DELETE FROM reset_tokens; DELETE FROM audit_logs;');
 });
@@ -15,9 +12,6 @@ afterAll(() => {
   db.close();
 });
 
-// ─────────────────────────────────────────────
-// REGISTER
-// ─────────────────────────────────────────────
 describe('POST /api/auth/register', () => {
   test('inregistrare cu succes', async () => {
     const res = await request(app)
@@ -57,21 +51,16 @@ describe('POST /api/auth/register', () => {
     expect(res.status).toBe(400);
   });
 
-  // DEMONSTRATIE VULNERABILITATE: parola stocata in clar
   test('[VULN] parola este stocata in clar in baza de date', async () => {
     await request(app)
       .post('/api/auth/register')
       .send({ email: 'vuln@example.com', password: 'parolaSecreta' });
 
     const user = db.prepare('SELECT password FROM users WHERE email = ?').get('vuln@example.com');
-    // In v1: parola e in clar, nu e hash-uita
     expect(user.password).toBe('parolaSecreta');
   });
 });
 
-// ─────────────────────────────────────────────
-// LOGIN
-// ─────────────────────────────────────────────
 describe('POST /api/auth/login', () => {
   beforeEach(async () => {
     await request(app)
@@ -106,9 +95,6 @@ describe('POST /api/auth/login', () => {
   });
 });
 
-// ─────────────────────────────────────────────
-// LOGOUT
-// ─────────────────────────────────────────────
 describe('POST /api/auth/logout', () => {
   test('logout returneaza succes', async () => {
     const res = await request(app)
@@ -120,9 +106,6 @@ describe('POST /api/auth/logout', () => {
   });
 });
 
-// ─────────────────────────────────────────────
-// FORGOT PASSWORD
-// ─────────────────────────────────────────────
 describe('POST /api/auth/forgot-password', () => {
   beforeEach(async () => {
     await request(app)
@@ -148,9 +131,6 @@ describe('POST /api/auth/forgot-password', () => {
   });
 });
 
-// ─────────────────────────────────────────────
-// RESET PASSWORD
-// ─────────────────────────────────────────────
 describe('POST /api/auth/reset-password', () => {
   let resetToken;
 
@@ -173,7 +153,6 @@ describe('POST /api/auth/reset-password', () => {
 
     expect(res.status).toBe(200);
 
-    // Verifica ca noua parola functioneaza la login
     const loginRes = await request(app)
       .post('/api/auth/login')
       .send({ email: 'reset2@example.com', password: 'parolaNoua' });

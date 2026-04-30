@@ -1,17 +1,15 @@
-// public/app.js — Frontend logic pentru AuthX v1-vulnerable
-const API = '';  // same origin
+const API = '';
 
 let currentToken = localStorage.getItem('authx_token') || null;
-let currentUser  = JSON.parse(localStorage.getItem('authx_user') || 'null');
+let currentUser = JSON.parse(localStorage.getItem('authx_user') || 'null');
 
-// ── INIT ──────────────────────────────────────────────────────
+
 window.addEventListener('DOMContentLoaded', () => {
   if (currentToken && currentUser) {
     showDashboard();
   }
 });
 
-// ── TAB SWITCH ────────────────────────────────────────────────
 function switchTab(tab) {
   const isLogin = tab === 'login';
   document.getElementById('login-form').classList.toggle('hidden', !isLogin);
@@ -21,7 +19,6 @@ function switchTab(tab) {
   hideMsg();
 }
 
-// ── MESSAGES ──────────────────────────────────────────────────
 function showMsg(text, type = 'error') {
   const el = document.getElementById('auth-msg');
   el.textContent = text;
@@ -32,14 +29,13 @@ function hideMsg() {
   document.getElementById('auth-msg').classList.add('hidden');
 }
 
-// ── AUTH CALLS ────────────────────────────────────────────────
 async function doLogin(e) {
   e.preventDefault();
-  const email    = document.getElementById('login-email').value;
+  const email = document.getElementById('login-email').value;
   const password = document.getElementById('login-password').value;
 
   try {
-    const res  = await fetch(`${API}/api/auth/login`, {
+    const res = await fetch(`${API}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -47,13 +43,12 @@ async function doLogin(e) {
     const data = await res.json();
 
     if (!res.ok) {
-      // DEMONSTRATIE: mesajele diferite dezvaluie starea contului (user enumeration)
       showMsg(`❌ ${data.error}`, 'error');
       return;
     }
 
     currentToken = data.token;
-    currentUser  = data.user;
+    currentUser = data.user;
     localStorage.setItem('authx_token', currentToken);
     localStorage.setItem('authx_user', JSON.stringify(currentUser));
     showDashboard();
@@ -64,12 +59,12 @@ async function doLogin(e) {
 
 async function doRegister(e) {
   e.preventDefault();
-  const email    = document.getElementById('reg-email').value;
+  const email = document.getElementById('reg-email').value;
   const password = document.getElementById('reg-password').value;
-  const role     = document.getElementById('reg-role').value;
+  const role = document.getElementById('reg-role').value;
 
   try {
-    const res  = await fetch(`${API}/api/auth/register`, {
+    const res = await fetch(`${API}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, role })
@@ -85,16 +80,14 @@ async function doRegister(e) {
 
 async function doLogout() {
   await fetch(`${API}/api/auth/logout`, { method: 'POST' });
-  // DEMONSTRATIE: token-ul rămâne valid în continuare (logout nu face nimic server-side)
   currentToken = null;
-  currentUser  = null;
+  currentUser = null;
   localStorage.removeItem('authx_token');
   localStorage.removeItem('authx_user');
   document.getElementById('dashboard-page').classList.add('hidden');
   document.getElementById('auth-page').classList.remove('hidden');
 }
 
-// ── DASHBOARD ─────────────────────────────────────────────────
 function showDashboard() {
   document.getElementById('auth-page').classList.add('hidden');
   document.getElementById('dashboard-page').classList.remove('hidden');
@@ -104,11 +97,10 @@ function showDashboard() {
   loadAudit();
 }
 
-// ── TICKETS ───────────────────────────────────────────────────
 async function loadTickets() {
   const el = document.getElementById('tickets-list');
   try {
-    const res  = await fetch(`${API}/api/tickets`, {
+    const res = await fetch(`${API}/api/tickets`, {
       headers: { 'authorization': currentToken }
     });
     const data = await res.json();
@@ -153,9 +145,9 @@ function closeModal() {
 async function doCreateTicket(e) {
   e.preventDefault();
   const body = {
-    title:       document.getElementById('t-title').value,
+    title: document.getElementById('t-title').value,
     description: document.getElementById('t-desc').value,
-    severity:    document.getElementById('t-severity').value,
+    severity: document.getElementById('t-severity').value,
   };
   await fetch(`${API}/api/tickets`, {
     method: 'POST',
@@ -165,15 +157,13 @@ async function doCreateTicket(e) {
   closeModal();
   loadTickets();
   document.getElementById('t-title').value = '';
-  document.getElementById('t-desc').value  = '';
+  document.getElementById('t-desc').value = '';
 }
 
-// ── AUDIT ─────────────────────────────────────────────────────
 async function loadAudit() {
   const el = document.getElementById('audit-list');
   try {
-    // DEMONSTRATIE: endpoint-ul nu necesita autentificare (public)
-    const res  = await fetch(`${API}/api/audit`);
+    const res = await fetch(`${API}/api/audit`);
     const data = await res.json();
     if (!data.length) {
       el.innerHTML = '<p class="audit-empty">Log gol — acțiunile nu sunt înregistrate în v1</p>';
@@ -190,19 +180,17 @@ async function loadAudit() {
   }
 }
 
-// ── FORGOT / RESET ────────────────────────────────────────────
 async function doForgot(e) {
   e.preventDefault();
   const email = document.getElementById('forgot-email').value;
-  const res   = await fetch(`${API}/api/auth/forgot-password`, {
+  const res = await fetch(`${API}/api/auth/forgot-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email })
   });
-  const data  = await res.json();
-  const box   = document.getElementById('reset-token-box');
+  const data = await res.json();
+  const box = document.getElementById('reset-token-box');
   if (data.resetToken) {
-    // DEMONSTRATIE: token-ul e trimis direct în răspuns (nu prin email)
     box.textContent = `⚠️ Token (în loc de email): ${data.resetToken}`;
     box.classList.remove('hidden');
     document.getElementById('reset-token-input').value = data.resetToken;
@@ -214,22 +202,21 @@ async function doForgot(e) {
 
 async function doReset(e) {
   e.preventDefault();
-  const token       = document.getElementById('reset-token-input').value;
+  const token = document.getElementById('reset-token-input').value;
   const newPassword = document.getElementById('new-password').value;
-  const res  = await fetch(`${API}/api/auth/reset-password`, {
+  const res = await fetch(`${API}/api/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, newPassword })
   });
   const data = await res.json();
-  const box  = document.getElementById('reset-token-box');
+  const box = document.getElementById('reset-token-box');
   box.textContent = res.ok ? `✅ ${data.message} (token NEINVALIDAT — reutilizabil!)` : `❌ ${data.error}`;
   box.classList.remove('hidden');
 }
 
-// ── UTILS ─────────────────────────────────────────────────────
 function escHtml(str) {
   return String(str)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }

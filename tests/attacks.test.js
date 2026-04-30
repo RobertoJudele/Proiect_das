@@ -36,7 +36,6 @@ describe('[ATAC 1] SQL Injection pe /api/auth/login', () => {
       .post('/api/auth/login')
       .send({ email: "' OR '1'='1", password: 'orice' });
 
-    // In v1 (vulnerabil): atacul reuseste, primim token fara sa stim parola
     expect(res.status).toBe(200);
     expect(res.body.token).toBeDefined();
 
@@ -45,14 +44,10 @@ describe('[ATAC 1] SQL Injection pe /api/auth/login', () => {
   });
 
   test('[ATAC 1b] apostroful in email expune erori de DB (information disclosure)', async () => {
-    // Un simplu apostrof poate rupe query-ul si returna erori interne
     const res = await request(app)
       .post('/api/auth/login')
       .send({ email: "test'broken", password: 'x' });
 
-    // In v1: poate returna 401 (user not found) sau 500 (eroare DB)
-    // Ambele sunt problematice pentru ca dezvaluie informatii
-    // Important: nu returneaza 400 cu mesaj generic - endpoint-ul e vulnerabil
     expect([401, 500]).toContain(res.status);
     console.log('[ATAC 1b] Apostrof in email => status:', res.status, '| body:', JSON.stringify(res.body));
   });
