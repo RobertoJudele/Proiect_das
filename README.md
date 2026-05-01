@@ -1,9 +1,6 @@
 # Proiect #2 – Break the Login
 
-## v1-vulnerable — Varianta NESECURIZATA (intentionat)
-
-> **ATENTIE**: Aceasta versiune contine vulnerabilitati introduse intentionat
-> in scop educational. NU folosi in productie!
+## v1-vulnerable — Varianta NESECURIZATA 
 
 ## Stack tehnic
 - **Runtime**: Node.js
