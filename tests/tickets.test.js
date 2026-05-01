@@ -1,5 +1,3 @@
-// tests/tickets.test.js
-// Teste pentru CRUD tickets (v1-vulnerable)
 
 const request = require('supertest');
 const app = require('../src/app');
@@ -11,8 +9,6 @@ let userId;
 beforeEach(async () => {
   db.exec('DELETE FROM users; DELETE FROM tickets; DELETE FROM audit_logs;');
   await request(app).post('/api/auth/reset-limiter').send();
-
-  // Cream un user si obtinem token
   await request(app)
     .post('/api/auth/register')
     .send({ email: 'ticket_user@example.com', password: 'parola123' });
@@ -132,7 +128,6 @@ describe('DELETE /api/tickets/:id', () => {
 
     expect(res.status).toBe(200);
 
-    // Verifica ca a fost sters
     const getRes = await request(app)
       .get(`/api/tickets/${createRes.body.ticketId}`)
       .set('authorization', 'Bearer ' + token);

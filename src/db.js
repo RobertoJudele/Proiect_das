@@ -1,5 +1,4 @@
-// src/db.js
-// VULNERABIL: Baza de date SQLite fara nicio protectie speciala
+
 const Database = require('better-sqlite3');
 const path = require('path');
 
@@ -7,7 +6,7 @@ const DB_PATH = path.join(__dirname, '..', 'auth.db');
 
 const db = new Database(DB_PATH);
 
-// Initializare tabele
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,

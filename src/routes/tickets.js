@@ -1,24 +1,10 @@
-// src/routes/tickets.js
-// ============================================================
-// ATENTIE: VARIANTA v1 - COMPLET NESECURIZATA (intentionat)
-// Vulnerabilitati prezente:
-//   1. IDOR - oricine poate vedea/modifica orice ticket
-//   2. Fara verificare de proprietate (owner_id ignorat)
-//   3. XSS posibil - description nu e sanitizata
-//   4. Fara validare input
-// ============================================================
-
 const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const db = require('../db');
 const authMiddleware = require('../middleware/auth');
+const { logAction } = require('./audit');
 
-// -------------------------------------------------------
-// GET /api/tickets
-// VULNERABILITATE IDOR: Returneaza TOATE ticket-urile tuturor utilizatorilor
-// Un ANALYST poate vedea ticket-urile altor ANALYST-i sau ale MANAGER-ilor
-// -------------------------------------------------------
 router.get('/', authMiddleware, (req, res) => {
   let tickets;
   if (req.user.role === 'MANAGER') {
@@ -29,16 +15,12 @@ router.get('/', authMiddleware, (req, res) => {
   res.json(tickets);
 });
 
-// -------------------------------------------------------
-// GET /api/tickets/:id
-// VULNERABILITATE IDOR: Oricine poate accesa orice ticket dupa ID
-// -------------------------------------------------------
 router.get('/:id', authMiddleware, (req, res) => {
   const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(req.params.id);
   if (!ticket) {
     return res.status(404).json({ error: 'Ticket negasit' });
   }
-  
+
   if (req.user.role !== 'MANAGER' && ticket.owner_id !== req.user.userId) {
     return res.status(403).json({ error: 'Acces interzis' });
   }
@@ -46,12 +28,8 @@ router.get('/:id', authMiddleware, (req, res) => {
   res.json(ticket);
 });
 
-// -------------------------------------------------------
-// POST /api/tickets
-// VULNERABILITATE: Description poate contine XSS (HTML/JS netratat)
-// -------------------------------------------------------
-router.post('/', 
-  authMiddleware, 
+router.post('/',
+  authMiddleware,
   [
     body('title').notEmpty().withMessage('Titlul este obligatoriu').escape(),
     body('description').optional().escape(),
@@ -69,22 +47,20 @@ router.post('/',
       'INSERT INTO tickets (title, description, severity, owner_id) VALUES (?, ?, ?, ?)'
     ).run(title, description || '', severity || 'LOW', req.user.userId);
 
+    logAction(req.user.userId, 'CREATE_TICKET', 'TICKET', result.lastInsertRowid, req.ip);
+
     res.status(201).json({
       message: 'Ticket creat',
       ticketId: result.lastInsertRowid
     });
-});
+  });
 
-// -------------------------------------------------------
-// PUT /api/tickets/:id
-// VULNERABILITATE IDOR: Oricine poate modifica orice ticket
-// -------------------------------------------------------
-router.put('/:id', 
+router.put('/:id',
   authMiddleware,
   [
     body('title').optional().escape(),
     body('description').optional().escape()
-  ], 
+  ],
   (req, res) => {
     const { title, description, severity, status } = req.body;
     const ticketId = req.params.id;
@@ -108,13 +84,11 @@ router.put('/:id',
       ticketId
     );
 
-    res.json({ message: 'Ticket actualizat' });
-});
+    logAction(req.user.userId, 'UPDATE_TICKET', 'TICKET', ticketId, req.ip);
 
-// -------------------------------------------------------
-// DELETE /api/tickets/:id
-// VULNERABILITATE IDOR: Oricine poate sterge orice ticket
-// -------------------------------------------------------
+    res.json({ message: 'Ticket actualizat' });
+  });
+
 router.delete('/:id', authMiddleware, (req, res) => {
   const ticketId = req.params.id;
 
@@ -128,6 +102,7 @@ router.delete('/:id', authMiddleware, (req, res) => {
   }
 
   db.prepare('DELETE FROM tickets WHERE id = ?').run(ticketId);
+  logAction(req.user.userId, 'DELETE_TICKET', 'TICKET', ticketId, req.ip);
   res.json({ message: 'Ticket sters' });
 });
 

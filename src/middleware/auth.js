@@ -1,5 +1,4 @@
-// src/middleware/auth.js
-// VULNERABIL: Verificare token slaba, fara validare corecta
+
 const jwt = require('jsonwebtoken');
 
 const db = require('../db');
@@ -13,7 +12,7 @@ function authMiddleware(req, res, next) {
 
   const token = authHeader.split(' ')[1];
 
-  // Verificare blacklist
+
   const isBlacklisted = db.prepare('SELECT id FROM token_blacklist WHERE token = ?').get(token);
   if (isBlacklisted) {
     return res.status(401).json({ error: 'Token invalidat (te rugam sa te autentifici din nou)' });

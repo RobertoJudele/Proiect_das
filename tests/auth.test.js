@@ -1,12 +1,9 @@
-// tests/auth.test.js
-// Teste pentru fluxul normal de autentificare (v1-vulnerable)
-// Verifica ca functionalitatile de baza functioneaza
 
 const request = require('supertest');
 const app = require('../src/app');
 const db = require('../src/db');
 
-// Curatam DB-ul inainte de fiecare test
+
 beforeEach(async () => {
   db.exec('DELETE FROM users; DELETE FROM reset_tokens; DELETE FROM audit_logs;');
   await request(app).post('/api/auth/reset-limiter').send();
@@ -16,9 +13,7 @@ afterAll(() => {
   db.close();
 });
 
-// ─────────────────────────────────────────────
-// REGISTER
-// ─────────────────────────────────────────────
+
 describe('POST /api/auth/register', () => {
   test('inregistrare cu succes', async () => {
     const res = await request(app)
@@ -58,22 +53,18 @@ describe('POST /api/auth/register', () => {
     expect(res.status).toBe(400);
   });
 
-  // IN V2: parola este protejata
   test('[SECURE] parola NU este stocata in clar in baza de date', async () => {
     await request(app)
       .post('/api/auth/register')
       .send({ email: 'vuln@example.com', password: 'parolaSecreta' });
 
     const user = db.prepare('SELECT password FROM users WHERE email = ?').get('vuln@example.com');
-    // In v2: parola e hash-uita cu bcrypt, nu va fi la fel ca plain text
     expect(user.password).not.toBe('parolaSecreta');
-    expect(user.password.startsWith('$2b$')).toBe(true); // prefix bcrypt
+    expect(user.password.startsWith('$2b$')).toBe(true);
   });
 });
 
-// ─────────────────────────────────────────────
-// LOGIN
-// ─────────────────────────────────────────────
+
 describe('POST /api/auth/login', () => {
   beforeEach(async () => {
     await request(app)
@@ -108,9 +99,6 @@ describe('POST /api/auth/login', () => {
   });
 });
 
-// ─────────────────────────────────────────────
-// LOGOUT
-// ─────────────────────────────────────────────
 describe('POST /api/auth/logout', () => {
   test('logout returneaza succes', async () => {
     const res = await request(app)
@@ -121,10 +109,6 @@ describe('POST /api/auth/logout', () => {
     expect(res.body.message).toMatch(/deconectat/i);
   });
 });
-
-// ─────────────────────────────────────────────
-// FORGOT PASSWORD
-// ─────────────────────────────────────────────
 describe('POST /api/auth/forgot-password', () => {
   beforeEach(async () => {
     await request(app)
@@ -146,14 +130,11 @@ describe('POST /api/auth/forgot-password', () => {
       .post('/api/auth/forgot-password')
       .send({ email: 'nu_exista@example.com' });
 
-    expect(res.status).toBe(200); // In v2 intoarce 200 cu mesaj generic
+    expect(res.status).toBe(200); /
     expect(res.body.message).toMatch(/Daca email-ul exista/i);
   });
 });
 
-// ─────────────────────────────────────────────
-// RESET PASSWORD
-// ─────────────────────────────────────────────
 describe('POST /api/auth/reset-password', () => {
   let resetToken;
 
@@ -176,7 +157,6 @@ describe('POST /api/auth/reset-password', () => {
 
     expect(res.status).toBe(200);
 
-    // Verifica ca noua parola functioneaza la login
     const loginRes = await request(app)
       .post('/api/auth/login')
       .send({ email: 'reset2@example.com', password: 'parolaNoua' });

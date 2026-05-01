@@ -103,7 +103,7 @@ async function loadTickets() {
   const el = document.getElementById('tickets-list');
   try {
     const res = await fetch(`${API}/api/tickets`, {
-      headers: { 'authorization': currentToken }
+      headers: { 'authorization': `Bearer ${currentToken}` }
     });
     const data = await res.json();
     if (!data.length) {
@@ -132,7 +132,7 @@ async function loadTickets() {
 async function deleteTicket(id) {
   await fetch(`${API}/api/tickets/${id}`, {
     method: 'DELETE',
-    headers: { 'authorization': currentToken }
+    headers: { 'authorization': `Bearer ${currentToken}` }
   });
   loadTickets();
 }
@@ -153,7 +153,7 @@ async function doCreateTicket(e) {
   };
   await fetch(`${API}/api/tickets`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'authorization': currentToken },
+    headers: { 'Content-Type': 'application/json', 'authorization': `Bearer ${currentToken}` },
     body: JSON.stringify(body)
   });
   closeModal();
@@ -165,10 +165,16 @@ async function doCreateTicket(e) {
 async function loadAudit() {
   const el = document.getElementById('audit-list');
   try {
-    const res = await fetch(`${API}/api/audit`);
+    const res = await fetch(`${API}/api/audit`, {
+      headers: { 'authorization': `Bearer ${currentToken}` }
+    });
     const data = await res.json();
+    if (!res.ok) {
+      el.innerHTML = `<p class="audit-empty" style="color:red">Eroare: ${data.error || 'Necunoscută'}</p>`;
+      return;
+    }
     if (!data.length) {
-      el.innerHTML = '<p class="audit-empty">Log gol — acțiunile nu sunt înregistrate în v1</p>';
+      el.innerHTML = '<p class="audit-empty">Log gol</p>';
       return;
     }
     el.innerHTML = data.map(l => `
